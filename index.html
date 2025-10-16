@@ -1,0 +1,310 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Encrypted Private Notes</title>
+<style>
+  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial; background:#0f1724; color:#e6eef8;
+    display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:20px; }
+  .card { background:#0b1220; padding:22px; border-radius:12px; width:100%; max-width:720px; box-shadow:0 10px 30px rgba(2,6,23,0.6); }
+  h1 { margin:0 0 12px 0; font-size:20px; }
+  label { font-size:13px; color:#9fb0cc; display:block; margin-top:10px; }
+  input[type="password"], textarea { width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #1f2a3a; background:#071424; color:#dbeeff; }
+  textarea { min-height:260px; resize:vertical; margin-top:8px; }
+  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
+  button { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; background:#2563eb; color:white; }
+  button.secondary { background:#334155; }
+  .muted { color:#98a8c0; font-size:13px; margin-top:8px; }
+  .danger { background:#dc2626; }
+  .status { margin-top:10px; color:#9fb0cc; font-size:13px; }
+  .hint { font-size:12px; color:#7f9cb8; margin-top:6px; }
+</style>
+</head>
+<body>
+  <div class="card" role="main" aria-labelledby="title">
+    <h1 id="title">Encrypted Private Notes (browser-only)</h1>
+
+    <div id="auth">
+      <label for="password">Password</label>
+      <input id="password" type="password" autocomplete="current-password" placeholder="Enter your password">
+
+      <div class="row">
+        <button id="unlockBtn">Unlock</button>
+        <button id="setNewBtn" class="secondary">Create New / Reset</button>
+        <button id="changeBtn" class="secondary" style="display:none">Change Password</button>
+      </div>
+
+      <p class="muted">If this is the first time, enter a new password and click <strong>Create New / Reset</strong> (this will wipe any existing note). Once unlocked, write &amp; Save — the note will be stored encrypted in your browser's localStorage.</p>
+    </div>
+
+    <div id="notesUI" style="display:none;">
+      <label for="noteArea">Your notes (encrypted)</label>
+      <textarea id="noteArea" placeholder="Write your notes here..."></textarea>
+
+      <div class="row">
+        <button id="saveBtn">Save (encrypt)</button>
+        <button id="logoutBtn" class="secondary">Lock</button>
+        <button id="deleteBtn" class="danger">Delete Encrypted Note</button>
+      </div>
+
+      <p class="hint">Notes are encrypted locally using AES-GCM. Salt/IV/ciphertext live in localStorage under the key <code>enc_note</code>.</p>
+    </div>
+
+    <div id="status" class="status" aria-live="polite"></div>
+  </div>
+
+<script>
+/*
+  Encrypted Notes (Web Crypto API)
+  - PBKDF2 with SHA-256, 200k iterations to derive AES-GCM-256 key
+  - AES-GCM with 12-byte IV
+  - Data stored in localStorage as JSON { salt, iv, ciphertext } (base64 strings)
+*/
+
+const STORAGE_KEY = 'enc_note';
+const ITERATIONS = 200000; // high iteration count for PBKDF2
+const KEY_LEN = 256; // AES-256
+const IV_LEN = 12; // 96 bits recommended for AES-GCM
+
+// Helpers: base64 encode/decode
+function toBase64(buffer) {
+  const bytes = new Uint8Array(buffer);
+  let binary = '';
+  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
+  return btoa(binary);
+}
+function fromBase64(base64) {
+  const binary = atob(base64);
+  const len = binary.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes.buffer;
+}
+
+function setStatus(msg, isError = false) {
+  const el = document.getElementById('status');
+  el.textContent = msg || '';
+  el.style.color = isError ? '#ffb4b4' : '#9fb0cc';
+}
+
+// Generate random bytes
+function randomBytes(length) {
+  const arr = new Uint8Array(length);
+  crypto.getRandomValues(arr);
+  return arr.buffer;
+}
+
+// Derive AES-GCM key from password + salt (PBKDF2)
+async function deriveKeyFromPassword(password, saltBuffer) {
+  const enc = new TextEncoder();
+  const pwKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
+  const key = await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: saltBuffer,
+      iterations: ITERATIONS,
+      hash: 'SHA-256'
+    },
+    pwKey,
+    { name: 'AES-GCM', length: KEY_LEN },
+    false,
+    ['encrypt', 'decrypt']
+  );
+  return key;
+}
+
+// Encrypt plaintext string
+async function encryptNotePlaintext(plaintext, password) {
+  const salt = randomBytes(16); // 16 bytes salt
+  const iv = randomBytes(IV_LEN);
+  const key = await deriveKeyFromPassword(password, salt);
+  const enc = new TextEncoder();
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
+  return {
+    salt: toBase64(salt),
+    iv: toBase64(iv),
+    ciphertext: toBase64(ciphertext)
+  };
+}
+
+// Decrypt using stored json and password
+async function decryptNoteWithPassword(storedObj, password) {
+  try {
+    const saltBuf = fromBase64(storedObj.salt);
+    const ivBuf = fromBase64(storedObj.iv);
+    const ctBuf = fromBase64(storedObj.ciphertext);
+    const key = await deriveKeyFromPassword(password, saltBuf);
+    const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBuf }, key, ctBuf);
+    const dec = new TextDecoder();
+    return dec.decode(plainBuf);
+  } catch (e) {
+    throw new Error('Decryption failed (wrong password or corrupted data).');
+  }
+}
+
+/* UI Logic */
+const passwordInput = document.getElementById('password');
+const unlockBtn = document.getElementById('unlockBtn');
+const setNewBtn = document.getElementById('setNewBtn');
+const changeBtn = document.getElementById('changeBtn');
+const notesUI = document.getElementById('notesUI');
+const authUI = document.getElementById('auth');
+const noteArea = document.getElementById('noteArea');
+const saveBtn = document.getElementById('saveBtn');
+const logoutBtn = document.getElementById('logoutBtn');
+const deleteBtn = document.getElementById('deleteBtn');
+
+let unlockedPassword = null;
+
+function storageExists() {
+  return !!localStorage.getItem(STORAGE_KEY);
+}
+
+unlockBtn.addEventListener('click', async () => {
+  const pw = passwordInput.value || '';
+  if (!pw) {
+    setStatus('Enter password to unlock.', true);
+    return;
+  }
+  if (!storageExists()) {
+    setStatus('No encrypted note found. Use "Create New / Reset" to create one, or save after entering notes.', false);
+    // show notes UI anyway (this will create new encrypted item on save)
+    unlockedPassword = pw;
+    showNotesUI(true);
+    return;
+  }
+  const raw = localStorage.getItem(STORAGE_KEY);
+  try {
+    const stored = JSON.parse(raw);
+    setStatus('Decrypting...');
+    const plain = await decryptNoteWithPassword(stored, pw);
+    unlockedPassword = pw;
+    noteArea.value = plain;
+    showNotesUI(true);
+    setStatus('Unlocked. You can edit & save your note.');
+  } catch (e) {
+    console.error(e);
+    setStatus('Failed to unlock — wrong password or corrupted data.', true);
+  }
+});
+
+setNewBtn.addEventListener('click', async () => {
+  // Reset/create new encrypted note (will overwrite)
+  const pw = passwordInput.value || '';
+  if (!pw) {
+    setStatus('Enter a password to create (or reset) storage.', true);
+    return;
+  }
+  if (!confirm('This will create a new encrypted note and overwrite any existing one. Continue?')) return;
+  try {
+    const encObj = await encryptNotePlaintext('', pw); // empty initial note
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(encObj));
+    unlockedPassword = pw;
+    noteArea.value = '';
+    showNotesUI(true);
+    setStatus('Created new encrypted storage. You are unlocked.');
+  } catch (e) {
+    console.error(e);
+    setStatus('Failed to create new storage.', true);
+  }
+});
+
+changeBtn.addEventListener('click', async () => {
+  // Change password: decrypt with current unlockedPassword, re-encrypt with new password in input
+  const newPw = passwordInput.value || '';
+  if (!unlockedPassword) {
+    setStatus('You must be unlocked to change password. Unlock first.', true);
+    return;
+  }
+  if (!newPw) {
+    setStatus('Enter the new password in the Password field before clicking Change Password.', true);
+    return;
+  }
+  if (newPw === unlockedPassword) {
+    setStatus('New password must be different.', true);
+    return;
+  }
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    const stored = JSON.parse(raw);
+    const plaintext = await decryptNoteWithPassword(stored, unlockedPassword);
+    const newEnc = await encryptNotePlaintext(plaintext, newPw);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(newEnc));
+    unlockedPassword = newPw;
+    setStatus('Password changed successfully.');
+  } catch (e) {
+    console.error(e);
+    setStatus('Failed to change password. Make sure you are unlocked and entered a valid new password.', true);
+  }
+});
+
+saveBtn.addEventListener('click', async () => {
+  if (!unlockedPassword) {
+    setStatus('Unlock first to save.', true);
+    return;
+  }
+  const plaintext = noteArea.value;
+  setStatus('Encrypting & saving...');
+  try {
+    const encObj = await encryptNotePlaintext(plaintext, unlockedPassword);
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(encObj));
+    setStatus('Saved and encrypted locally ✅');
+  } catch (e) {
+    console.error(e);
+    setStatus('Save failed.', true);
+  }
+});
+
+logoutBtn.addEventListener('click', () => {
+  unlockedPassword = null;
+  noteArea.value = '';
+  passwordInput.value = '';
+  showNotesUI(false);
+  setStatus('Locked.');
+});
+
+deleteBtn.addEventListener('click', () => {
+  if (!confirm('Delete the encrypted note from localStorage? This action cannot be undone.')) return;
+  localStorage.removeItem(STORAGE_KEY);
+  unlockedPassword = null;
+  noteArea.value = '';
+  passwordInput.value = '';
+  showNotesUI(false);
+  setStatus('Encrypted note deleted.');
+});
+
+function showNotesUI(show) {
+  if (show) {
+    authUI.style.display = 'none';
+    notesUI.style.display = 'block';
+    changeBtn.style.display = 'inline-block';
+  } else {
+    authUI.style.display = 'block';
+    notesUI.style.display = 'none';
+    changeBtn.style.display = 'none';
+  }
+}
+
+// Auto-show authentication hint depending on storage
+if (storageExists()) {
+  setStatus('Encrypted note found. Enter password and click Unlock.');
+} else {
+  setStatus('No encrypted note present. Enter password and click "Create New / Reset" to start.');
+}
+
+// Allow Enter to unlock or save depending on UI
+passwordInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !notesUI.style.display) {
+    unlockBtn.click();
+  }
+});
+noteArea.addEventListener('keydown', (e) => {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault();
+    saveBtn.click();
+  }
+});
+</script>
+</body>
+</html>
