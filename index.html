@@ -1,72 +1,271 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-<meta charset="UTF-8">
-<title>My Secure Notes</title>
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<style>
-  body { font-family: sans-serif; background: #121212; color: #eee; max-width: 600px; margin: 50px auto; }
-  textarea, input { width: 100%; padding: 10px; margin: 10px 0; border-radius: 8px; border: none; }
-  textarea { height: 300px; resize: none; }
-  button { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 8px; cursor: pointer; }
-  button:hover { background: #0056b3; }
-  .hidden { display: none; }
-</style>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Encrypted Notes (Client-side)</title>
+  <style>
+    :root{font-family:system-ui,-apple-system,Segoe UI,Roboto,"Helvetica Neue",Arial}
+    body{max-width:900px;margin:28px auto;padding:20px}
+    header{display:flex;justify-content:space-between;align-items:center}
+    textarea{width:100%;height:300px;padding:12px;font-size:14px}
+    input[type=password]{padding:8px;font-size:14px}
+    .controls{display:flex;gap:8px;margin:8px 0}
+    button{padding:8px 12px;font-size:14px;cursor:pointer}
+    .note-meta{color:#666;font-size:13px;margin-top:6px}
+    .small{font-size:13px;color:#444}
+    footer{margin-top:18px;color:#666;font-size:13px}
+    .danger{color:#b21}
+    .success{color:#197}
+  </style>
 </head>
 <body>
-<h2>🔒 My Secure Notes</h2>
+  <header>
+    <h1>Encrypted Notes — Client-side</h1>
+    <div class="small">No server. Only your browser holds the raw note unless you export it.</div>
+  </header>
 
-<div id="login">
-  <p>Enter password to unlock your notes:</p>
-  <input type="password" id="password" placeholder="Enter password">
-  <button onclick="unlock()">Unlock</button>
-</div>
+  <section>
+    <label class="small">Password (used to lock / unlock your note)</label>
+    <div class="controls">
+      <input id="password" type="password" placeholder="Enter a strong password" autocomplete="new-password" />
+      <button id="unlockBtn">Unlock</button>
+      <button id="lockBtn">Lock</button>
+      <button id="changePwBtn">Change password</button>
+    </div>
+    <div class="note-meta" id="status">Locked</div>
+  </section>
 
-<div id="editor" class="hidden">
-  <textarea id="note"></textarea><br>
-  <button onclick="saveNote()">Save</button>
-  <button onclick="lock()">Lock</button>
-  <p style="font-size:0.9em;color:gray;">Your note is encrypted and saved in localStorage.</p>
-</div>
+  <section style="margin-top:14px">
+    <label class="small">Note</label>
+    <textarea id="note" placeholder="Your decrypted note will appear here when unlocked" disabled></textarea>
+    <div class="controls" style="margin-top:8px">
+      <button id="saveBtn" disabled>Save (encrypt)</button>
+      <button id="exportBtn">Export encrypted file</button>
+      <input id="importFile" type="file" accept="application/json" />
+      <button id="clearBtn" class="danger">Clear stored note</button>
+    </div>
+    <div class="note-meta">Storage location: <strong>localStorage</strong>. You can export the encrypted file and keep it anywhere you like.</div>
+  </section>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+  <footer>
+    <p><strong>Important:</strong> This is <em>client-side</em> encryption using PBKDF2 + AES-GCM. If you forget the password there is no recovery. Use a strong password (long & random).</p>
+  </footer>
+
 <script>
-const STORAGE_KEY = "secure_note";
-let password = "";
+// Utilities: encoding helpers
+function bufToBase64(buf){
+  return btoa(String.fromCharCode(...new Uint8Array(buf)));
+}
+function base64ToBuf(b64){
+  const bin = atob(b64);
+  const arr = new Uint8Array(bin.length);
+  for(let i=0;i<bin.length;i++) arr[i]=bin.charCodeAt(i);
+  return arr.buffer;
+}
+function strToBuf(str){
+  return new TextEncoder().encode(str);
+}
+function bufToStr(buf){
+  return new TextDecoder().decode(buf);
+}
 
-function unlock() {
-  password = document.getElementById("password").value;
-  const encrypted = localStorage.getItem(STORAGE_KEY);
-  if (!encrypted) {
-    document.getElementById("editor").classList.remove("hidden");
-    document.getElementById("login").classList.add("hidden");
+// Crypto parameters
+const ITERATIONS = 200000; // configurable
+const KEY_LENGTH = 256; // bits for AES-GCM
+const SALT_BYTES = 16;
+const IV_BYTES = 12;
+
+async function deriveKey(password, saltBuffer){
+  const pwKey = await crypto.subtle.importKey(
+    'raw', strToBuf(password), {name:'PBKDF2'}, false, ['deriveKey']
+  );
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2', salt: saltBuffer, iterations: ITERATIONS, hash: 'SHA-256'},
+    pwKey,
+    {name:'AES-GCM', length: KEY_LENGTH},
+    false,
+    ['encrypt','decrypt']
+  );
+}
+
+async function encryptNote(plaintext, password){
+  const salt = crypto.getRandomValues(new Uint8Array(SALT_BYTES));
+  const iv = crypto.getRandomValues(new Uint8Array(IV_BYTES));
+  const key = await deriveKey(password, salt.buffer);
+  const ct = await crypto.subtle.encrypt({name:'AES-GCM', iv: iv}, key, strToBuf(plaintext));
+  return {
+    version: 1,
+    iterations: ITERATIONS,
+    salt: bufToBase64(salt.buffer),
+    iv: bufToBase64(iv.buffer),
+    ciphertext: bufToBase64(ct)
+  };
+}
+
+async function decryptNote(payloadObj, password){
+  try{
+    const saltBuf = base64ToBuf(payloadObj.salt);
+    const ivBuf = base64ToBuf(payloadObj.iv);
+    const ctBuf = base64ToBuf(payloadObj.ciphertext);
+    const key = await deriveKey(password, saltBuf);
+    const pt = await crypto.subtle.decrypt({name:'AES-GCM', iv: ivBuf}, key, ctBuf);
+    return bufToStr(pt);
+  }catch(e){
+    throw new Error('Decryption failed — wrong password or corrupted data.');
+  }
+}
+
+// localStorage helpers
+const STORAGE_KEY = 'encrypted_note_v1';
+function saveToStorage(obj){
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
+}
+function loadFromStorage(){
+  const raw = localStorage.getItem(STORAGE_KEY);
+  return raw ? JSON.parse(raw) : null;
+}
+function clearStorage(){
+  localStorage.removeItem(STORAGE_KEY);
+}
+
+// UI interactions
+const passwordInput = document.getElementById('password');
+const unlockBtn = document.getElementById('unlockBtn');
+const lockBtn = document.getElementById('lockBtn');
+const changePwBtn = document.getElementById('changePwBtn');
+const noteArea = document.getElementById('note');
+const saveBtn = document.getElementById('saveBtn');
+const exportBtn = document.getElementById('exportBtn');
+const importFile = document.getElementById('importFile');
+const clearBtn = document.getElementById('clearBtn');
+const status = document.getElementById('status');
+
+let unlocked = false;
+let currentPayload = null; // encrypted payload object
+let currentPassword = null;
+
+function setLockedUI(){
+  unlocked = false;
+  noteArea.disabled = true;
+  saveBtn.disabled = true;
+  status.textContent = 'Locked';
+}
+function setUnlockedUI(){
+  unlocked = true;
+  noteArea.disabled = false;
+  saveBtn.disabled = false;
+  status.textContent = 'Unlocked (note decrypted)';
+}
+
+// load stored payload if any
+currentPayload = loadFromStorage();
+if(currentPayload){
+  status.textContent = 'Locked — encrypted note found in localStorage.';
+}
+
+unlockBtn.addEventListener('click', async ()=>{
+  if(unlocked){ alert('Already unlocked'); return; }
+  const pw = passwordInput.value;
+  if(!pw){ alert('Enter password'); return; }
+  const payload = loadFromStorage();
+  if(!payload){
+    // no stored note; start new empty note unlocked
+    currentPassword = pw;
+    noteArea.value = '';
+    setUnlockedUI();
     return;
   }
-  try {
-    const bytes = CryptoJS.AES.decrypt(encrypted, password);
-    const decrypted = bytes.toString(CryptoJS.enc.Utf8);
-    if (!decrypted) throw new Error("Invalid password");
-    document.getElementById("note").value = decrypted;
-    document.getElementById("editor").classList.remove("hidden");
-    document.getElementById("login").classList.add("hidden");
-  } catch {
-    alert("Wrong password!");
+  try{
+    const plain = await decryptNote(payload, pw);
+    noteArea.value = plain;
+    currentPayload = payload;
+    currentPassword = pw;
+    setUnlockedUI();
+  }catch(e){
+    alert(e.message);
   }
-}
+});
 
-function saveNote() {
-  const note = document.getElementById("note").value;
-  const encrypted = CryptoJS.AES.encrypt(note, password).toString();
-  localStorage.setItem(STORAGE_KEY, encrypted);
-  alert("Note saved securely!");
-}
+lockBtn.addEventListener('click', ()=>{
+  if(!unlocked){ alert('Already locked'); return; }
+  passwordInput.value = '';
+  currentPassword = null;
+  noteArea.value = '';
+  setLockedUI();
+});
 
-function lock() {
-  document.getElementById("note").value = "";
-  document.getElementById("editor").classList.add("hidden");
-  document.getElementById("login").classList.remove("hidden");
-  password = "";
-}
+saveBtn.addEventListener('click', async ()=>{
+  if(!unlocked || !currentPassword){ alert('Unlock with password first'); return; }
+  const plaintext = noteArea.value;
+  const payload = await encryptNote(plaintext, currentPassword);
+  saveToStorage(payload);
+  currentPayload = payload;
+  status.textContent = 'Saved & encrypted to localStorage.';
+});
+
+exportBtn.addEventListener('click', ()=>{
+  const payload = loadFromStorage();
+  if(!payload){
+    alert('No encrypted note to export. Save first.');
+    return;
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], {type:'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = 'encrypted-note.json';
+  a.click();
+  URL.revokeObjectURL(url);
+});
+
+importFile.addEventListener('change', async (ev)=>{
+  const f = ev.target.files[0];
+  if(!f) return;
+  try{
+    const txt = await f.text();
+    const obj = JSON.parse(txt);
+    // minimal validation
+    if(!obj.ciphertext || !obj.salt || !obj.iv){
+      alert('File does not look like an encrypted note');
+      return;
+    }
+    saveToStorage(obj);
+    currentPayload = obj;
+    alert('Imported encrypted note to localStorage. Click Unlock and enter the password to decrypt it.');
+    status.textContent = 'Locked — imported encrypted note.';
+  }catch(e){
+    alert('Failed to import file: '+e.message);
+  }
+});
+
+clearBtn.addEventListener('click', ()=>{
+  if(confirm('Clear the encrypted note from localStorage? This cannot be undone.')){
+    clearStorage();
+    currentPayload = null;
+    passwordInput.value = '';
+    noteArea.value = '';
+    setLockedUI();
+    alert('Cleared.');
+  }
+});
+
+changePwBtn.addEventListener('click', async ()=>{
+  if(!unlocked || !currentPassword){ alert('Unlock with current password first'); return; }
+  const newPw = prompt('Enter new password (leave empty to cancel)');
+  if(!newPw) return;
+  // decrypt current text (we already have plaintext in textarea) and re-encrypt with new password
+  const plaintext = noteArea.value;
+  const newPayload = await encryptNote(plaintext, newPw);
+  saveToStorage(newPayload);
+  currentPayload = newPayload;
+  currentPassword = newPw;
+  alert('Password changed — note re-encrypted.');
+  status.textContent = 'Unlocked (password changed)';
+});
+
+// initialize UI
+setLockedUI();
+
 </script>
 </body>
 </html>
