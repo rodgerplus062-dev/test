@@ -3,457 +3,290 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Encrypted Notes — Online (Gist)</title>
+<title>Encrypted Notes — Client-side</title>
 <style>
-  body { font-family: Inter, system-ui, -apple-system, "Segoe UI", Roboto, Arial; background:#0f1724; color:#e6eef8;
-    display:flex; align-items:center; justify-content:center; min-height:100vh; margin:0; padding:20px; }
-  .card { background:#0b1220; padding:20px; border-radius:12px; width:100%; max-width:820px; box-shadow:0 10px 30px rgba(2,6,23,0.6); }
-  h1 { margin:0 0 12px 0; font-size:20px; }
-  label { font-size:13px; color:#9fb0cc; display:block; margin-top:10px; }
-  input[type="password"], input[type="text"], textarea { width:100%; box-sizing:border-box; padding:10px; border-radius:8px; border:1px solid #1f2a3a; background:#071424; color:#dbeeff; }
-  textarea { min-height:260px; resize:vertical; margin-top:8px; }
-  .row { display:flex; gap:8px; margin-top:12px; flex-wrap:wrap; }
-  button { padding:10px 14px; border-radius:10px; border:none; cursor:pointer; background:#2563eb; color:white; }
-  button.secondary { background:#334155; }
-  .danger { background:#dc2626; }
-  .muted { color:#98a8c0; font-size:13px; margin-top:8px; }
-  .status { margin-top:10px; color:#9fb0cc; font-size:13px; }
-  .small { font-size:12px; color:#7f9cb8; margin-top:6px; }
-  label.inline { display:inline-block; margin-right:8px; color:#9fb0cc; }
-  input.small { width:auto; display:inline-block; padding:8px 10px; }
-  .grid { display:grid; grid-template-columns:1fr 320px; gap:12px; align-items:start; }
-  @media (max-width:820px) { .grid { grid-template-columns:1fr; } }
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, Arial; max-width:900px; margin:28px auto; padding:0 18px; color:#111 }
+  header { display:flex; gap:12px; align-items:center; margin-bottom:18px }
+  input, textarea, button, select { font:inherit; }
+  .card { border:1px solid #ddd; padding:12px; border-radius:10px; box-shadow: 0 2px 6px rgba(0,0,0,0.02); margin-bottom:12px }
+  textarea { width:100%; min-height:120px; margin-top:6px; }
+  .notes-list { display:grid; gap:8px; }
+  .note-row { display:flex; justify-content:space-between; gap:8px; align-items:flex-start; }
+  .note-title { font-weight:600 }
+  .meta { color:#666; font-size:0.85rem }
+  .controls { display:flex; gap:8px; flex-wrap:wrap }
+  .danger { background:#f8d7da; color:#842029; border:1px solid #f5c2c7; }
+  .ok { background:#d1e7dd; color:#0f5132; border:1px solid #badbcc; }
+  small { color:#666 }
+  footer { margin-top:20px; font-size:0.9rem; color:#444; }
 </style>
 </head>
 <body>
-  <div class="card" role="main" aria-labelledby="title">
-    <h1 id="title">Encrypted Notes — Store Online (GitHub Gist)</h1>
+<header>
+  <h1>🔒 Encrypted Notes (client-side)</h1>
+</header>
 
-    <div class="grid">
-      <div>
-        <label for="password">Password</label>
-        <input id="password" type="password" autocomplete="current-password" placeholder="Enter password">
+<div class="card">
+  <div style="display:flex; gap:8px; align-items:center; margin-bottom:8px;">
+    <label><strong>Password</strong></label>
+    <input id="password" type="password" placeholder="Enter password" autocomplete="new-password" style="flex:1" />
+    <button id="unlockBtn">Unlock</button>
+    <button id="lockBtn">Lock</button>
+  </div>
+  <small>Notes are encrypted in your browser using PBKDF2 + AES-GCM. Password is not sent anywhere unless you export & upload it.</small>
+</div>
 
-        <div class="row">
-          <button id="unlockBtn">Unlock</button>
-          <button id="createNewBtn" class="secondary">Create New/Reset (Local)</button>
-          <button id="changeBtn" class="secondary" style="display:none">Change Password</button>
-        </div>
+<div class="card" id="editorCard" style="display:none">
+  <label><strong>Title</strong></label>
+  <input id="noteTitle" placeholder="Note title" />
+  <label style="margin-top:8px; display:block"><strong>Content</strong></label>
+  <textarea id="noteContent" placeholder="Write your note here..."></textarea>
+  <div style="display:flex; gap:8px; margin-top:8px;">
+    <button id="saveNoteBtn">Save Note</button>
+    <button id="newNoteBtn">New</button>
+    <button id="exportBtn">Export encrypted file</button>
+    <label style="display:inline-flex; align-items:center; gap:6px;">
+      <input id="autoSaveCheckbox" type="checkbox" /> Auto-save (encrypt on each save)
+    </label>
+  </div>
+</div>
 
-        <div id="notesUI" style="display:none;">
-          <label for="noteArea">Your notes (encrypted)</label>
-          <textarea id="noteArea" placeholder="Write your notes here..."></textarea>
-          <div class="row">
-            <button id="saveLocalBtn">Save Locally (encrypt)</button>
-            <button id="saveGistBtn">Save Online → Create/Update Gist</button>
-            <button id="logoutBtn" class="secondary">Lock</button>
-            <button id="deleteBtn" class="danger">Delete Local</button>
-          </div>
-          <p class="small">Tip: use Save Locally to keep encrypted data only in this browser. Use Save Online to upload encrypted JSON to a GitHub Gist.</p>
-        </div>
-      </div>
-
-      <div>
-        <label>GitHub Gist (online storage)</label>
-        <div class="small">You need a GitHub Personal Access Token (scope: <code>gist</code>). The page does not store your token unless you check the box below.</div>
-        <label class="inline">Token</label>
-        <input id="token" class="small" type="text" placeholder="ghp_xxx...">
-        <label class="inline"><input id="rememberToken" type="checkbox"> Remember token</label>
-
-        <div style="margin-top:8px;">
-          <label class="inline">Gist ID</label>
-          <input id="gistId" class="small" type="text" placeholder="(blank → create new)">
-        </div>
-
-        <div class="row" style="margin-top:10px;">
-          <button id="createGistBtn">Create New Gist (upload)</button>
-          <button id="updateGistBtn" class="secondary">Update Gist (use gist id)</button>
-          <button id="loadGistBtn" class="secondary">Load From Gist</button>
-        </div>
-
-        <p class="muted">When creating/updating a gist, the file content will be JSON with fields <code>salt</code>, <code>iv</code>, and <code>ciphertext</code> (base64). Use the same password to decrypt on another device.</p>
-
-        <hr style="border:0; height:1px; background:#122033; margin:12px 0;">
-        <div>
-          <button id="exportBtn" class="secondary">Export Encrypted JSON</button>
-          <button id="importBtn" class="secondary">Import Encrypted JSON</button>
-          <input id="fileInput" type="file" accept="application/json" style="display:none">
-        </div>
-
-        <p class="status" id="status" aria-live="polite"></p>
-      </div>
+<div class="card">
+  <div style="display:flex; justify-content:space-between; align-items:center;">
+    <h3 style="margin:0">Your Notes</h3>
+    <div class="controls">
+      <button id="importBtn">Import encrypted file</button>
+      <button id="eraseAllBtn" class="danger">Erase All (local)</button>
     </div>
   </div>
+  <div id="notesList" class="notes-list" style="margin-top:12px">
+    <small>Locked. Enter password and click Unlock to view notes.</small>
+  </div>
+</div>
+
+<input type="file" id="fileInput" style="display:none" accept=".json,.enc" />
+
+<footer>
+  <p><strong>How to host:</strong> create a new GitHub repo, add this file as <code>index.html</code>, enable GitHub Pages (branch main, / (root)). If you want to keep notes online, export the encrypted file and commit it to the repo — only someone with the password can read it.</p>
+  <p style="margin-top:8px; color:#a00"><strong>Security notes:</strong> This app encrypts locally. If you use a remote API or provide a token, that creates risk. Use a strong password and keep backups of exported encrypted files.</p>
+</footer>
 
 <script>
-/* Encryption utilities (PBKDF2 + AES-GCM) - same pattern as before */
-const STORAGE_KEY = 'enc_note_online';
-const ITERATIONS = 200000;
-const KEY_LEN = 256;
-const IV_LEN = 12;
+/* ======== Crypto helpers (AES-GCM + PBKDF2) ======== */
+const enc = new TextEncoder();
+const dec = new TextDecoder();
 
-function toBase64(buffer) {
-  const bytes = new Uint8Array(buffer);
-  let binary = '';
-  for (let i = 0; i < bytes.byteLength; i++) binary += String.fromCharCode(bytes[i]);
-  return btoa(binary);
-}
-function fromBase64(base64) {
-  const binary = atob(base64);
-  const len = binary.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
-}
-function randomBytes(length) {
-  const arr = new Uint8Array(length);
-  crypto.getRandomValues(arr);
-  return arr.buffer;
-}
-async function deriveKeyFromPassword(password, saltBuffer) {
-  const enc = new TextEncoder();
+async function deriveKey(password, salt, iterations = 200_000) {
   const pwKey = await crypto.subtle.importKey('raw', enc.encode(password), 'PBKDF2', false, ['deriveKey']);
-  const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt: saltBuffer, iterations: ITERATIONS, hash: 'SHA-256' },
+  return crypto.subtle.deriveKey(
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
     pwKey,
-    { name: 'AES-GCM', length: KEY_LEN },
+    { name: 'AES-GCM', length: 256 },
     false,
     ['encrypt','decrypt']
   );
-  return key;
-}
-async function encryptPlaintext(plaintext, password) {
-  const salt = randomBytes(16);
-  const iv = randomBytes(IV_LEN);
-  const key = await deriveKeyFromPassword(password, salt);
-  const enc = new TextEncoder();
-  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: iv }, key, enc.encode(plaintext));
-  return { salt: toBase64(salt), iv: toBase64(iv), ciphertext: toBase64(ciphertext) };
-}
-async function decryptStoredObj(obj, password) {
-  const saltBuf = fromBase64(obj.salt);
-  const ivBuf = fromBase64(obj.iv);
-  const ctBuf = fromBase64(obj.ciphertext);
-  const key = await deriveKeyFromPassword(password, saltBuf);
-  const plainBuf = await crypto.subtle.decrypt({ name: 'AES-GCM', iv: ivBuf }, key, ctBuf);
-  const dec = new TextDecoder();
-  return dec.decode(plainBuf);
 }
 
-/* UI wiring */
-const passwordInput = document.getElementById('password');
-const unlockBtn = document.getElementById('unlockBtn');
-const createNewBtn = document.getElementById('createNewBtn');
-const changeBtn = document.getElementById('changeBtn');
-const notesUI = document.getElementById('notesUI');
-const noteArea = document.getElementById('noteArea');
-const saveLocalBtn = document.getElementById('saveLocalBtn');
-const saveGistBtn = document.getElementById('saveGistBtn');
-const logoutBtn = document.getElementById('logoutBtn');
-const deleteBtn = document.getElementById('deleteBtn');
+function randBytes(n){ const a = new Uint8Array(n); crypto.getRandomValues(a); return a; }
+function toB64(u8){ return btoa(String.fromCharCode(...u8)); }
+function fromB64(s){ const bin = atob(s); const a = new Uint8Array(bin.length); for(let i=0;i<bin.length;i++) a[i]=bin.charCodeAt(i); return a; }
 
-const tokenInput = document.getElementById('token');
-const rememberToken = document.getElementById('rememberToken');
-const gistIdInput = document.getElementById('gistId');
-const createGistBtn = document.getElementById('createGistBtn');
-const updateGistBtn = document.getElementById('updateGistBtn');
-const loadGistBtn = document.getElementById('loadGistBtn');
-
-const exportBtn = document.getElementById('exportBtn');
-const importBtn = document.getElementById('importBtn');
-const fileInput = document.getElementById('fileInput');
-const statusEl = document.getElementById('status');
-
-let unlockedPassword = null;
-let lastEncryptedCached = null; // store last encrypted JSON to export without re-encrypting
-
-function setStatus(msg, isErr=false) {
-  statusEl.textContent = msg || '';
-  statusEl.style.color = isErr ? '#ffb4b4' : '#9fb0cc';
-}
-
-/* Local storage helpers */
-function storageExists() {
-  return !!localStorage.getItem(STORAGE_KEY);
-}
-function loadLocalStored() {
-  const raw = localStorage.getItem(STORAGE_KEY);
-  if (!raw) return null;
-  try { return JSON.parse(raw); } catch (e) { return null; }
-}
-
-/* Unlock / Create local */
-unlockBtn.addEventListener('click', async () => {
-  const pw = passwordInput.value || '';
-  if (!pw) { setStatus('Enter password to unlock.', true); return; }
-  if (!storageExists()) {
-    setStatus('No local encrypted note found — you can create new or save to gist after writing notes.', false);
-    unlockedPassword = pw;
-    showNotesUI(true);
-    return;
-  }
-  try {
-    const stored = loadLocalStored();
-    setStatus('Decrypting...');
-    const plain = await decryptStoredObj(stored, pw);
-    unlockedPassword = pw;
-    noteArea.value = plain;
-    lastEncryptedCached = stored;
-    showNotesUI(true);
-    setStatus('Unlocked locally.');
-  } catch (e) {
-    console.error(e);
-    setStatus('Failed to unlock (wrong password or corrupted data).', true);
-  }
-});
-createNewBtn.addEventListener('click', async () => {
-  const pw = passwordInput.value || '';
-  if (!pw) { setStatus('Enter a password to create.', true); return; }
-  if (!confirm('This will create new local encrypted storage (overwrite existing). Continue?')) return;
-  try {
-    const obj = await encryptPlaintext('', pw);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-    unlockedPassword = pw;
-    noteArea.value = '';
-    lastEncryptedCached = obj;
-    showNotesUI(true);
-    setStatus('Created new local encrypted storage.');
-  } catch (e) {
-    console.error(e);
-    setStatus('Failed to create local storage.', true);
-  }
-});
-
-/* Change password (re-encrypt) */
-changeBtn.addEventListener('click', async () => {
-  const newPw = passwordInput.value || '';
-  if (!unlockedPassword) { setStatus('Unlock first to change password.', true); return; }
-  if (!newPw) { setStatus('Enter new password in the password box, then click Change Password.', true); return; }
-  if (newPw === unlockedPassword) { setStatus('New password must differ.', true); return; }
-  try {
-    const stored = loadLocalStored();
-    const plain = stored ? await decryptStoredObj(stored, unlockedPassword) : noteArea.value || '';
-    const newObj = await encryptPlaintext(plain, newPw);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newObj));
-    unlockedPassword = newPw;
-    lastEncryptedCached = newObj;
-    setStatus('Password changed locally.');
-  } catch (e) {
-    console.error(e);
-    setStatus('Failed to change password.', true);
-  }
-});
-
-/* Save locally */
-saveLocalBtn.addEventListener('click', async () => {
-  if (!unlockedPassword) { setStatus('Unlock first to save.', true); return; }
-  const plain = noteArea.value || '';
-  setStatus('Encrypting & saving locally...');
-  try {
-    const obj = await encryptPlaintext(plain, unlockedPassword);
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-    lastEncryptedCached = obj;
-    setStatus('Saved & encrypted locally ✅');
-  } catch (e) {
-    console.error(e);
-    setStatus('Failed to save locally.', true);
-  }
-});
-
-/* Delete local */
-deleteBtn.addEventListener('click', () => {
-  if (!confirm('Delete local encrypted data? This cannot be undone.')) return;
-  localStorage.removeItem(STORAGE_KEY);
-  unlockedPassword = null;
-  noteArea.value = '';
-  showNotesUI(false);
-  setStatus('Local encrypted data deleted.');
-});
-
-/* Export/Import encrypted JSON */
-exportBtn.addEventListener('click', () => {
-  const obj = lastEncryptedCached || loadLocalStored();
-  if (!obj) { setStatus('No encrypted data to export. Save first.', true); return; }
-  const blob = new Blob([JSON.stringify(obj,null,2)], { type:'application/json' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = 'enc_note.json'; document.body.appendChild(a); a.click();
-  setTimeout(()=>{ URL.revokeObjectURL(url); a.remove(); }, 1000);
-  setStatus('Encrypted JSON downloaded.');
-});
-importBtn.addEventListener('click', () => fileInput.click());
-fileInput.addEventListener('change', (e) => {
-  const f = e.target.files[0]; if (!f) return;
-  const reader = new FileReader();
-  reader.onload = () => {
-    try {
-      const obj = JSON.parse(reader.result);
-      if (!obj.salt || !obj.iv || !obj.ciphertext) throw new Error('Not an encrypted note JSON');
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(obj));
-      lastEncryptedCached = obj;
-      setStatus('Imported encrypted JSON to local storage.');
-    } catch (err) {
-      setStatus('Invalid file.', true);
-    }
-  };
-  reader.readAsText(f);
-});
-
-/* GitHub Gist helpers */
-function getAuthHeaders() {
-  const tok = tokenInput.value.trim();
-  if (!tok) return null;
-  return { 'Authorization': 'token ' + tok, 'Accept': 'application/vnd.github.v3+json' };
-}
-
-async function createGistOnGitHub(encryptedObj) {
-  const headers = getAuthHeaders();
-  if (!headers) throw new Error('Missing token');
-  const payload = {
-    description: "Encrypted notes (AES-GCM, PBKDF2)",
-    public: false,
-    files: {
-      "enc_note.json": { content: JSON.stringify(encryptedObj, null, 2) }
-    }
-  };
-  const resp = await fetch('https://api.github.com/gists', {
-    method: 'POST',
-    headers: Object.assign({'Content-Type':'application/json'}, headers),
-    body: JSON.stringify(payload)
+/* Encrypt JSON object -> returns base64 string containing salt|iv|ciphertext */
+async function encryptObject(obj, password){
+  const salt = randBytes(16);
+  const iv = randBytes(12);
+  const key = await deriveKey(password, salt);
+  const pt = enc.encode(JSON.stringify(obj));
+  const ct = await crypto.subtle.encrypt({ name:'AES-GCM', iv }, key, pt);
+  const ctU8 = new Uint8Array(ct);
+  return JSON.stringify({
+    v:1,
+    salt: toB64(salt),
+    iv: toB64(iv),
+    ct: toB64(ctU8)
   });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Gist create failed: ' + resp.status + ' ' + errText);
-  }
-  const data = await resp.json();
-  return data; // contains id, html_url, files
 }
 
-async function updateGistOnGitHub(gistId, encryptedObj) {
-  const headers = getAuthHeaders();
-  if (!headers) throw new Error('Missing token');
-  if (!gistId) throw new Error('Missing gist id');
-  const payload = {
-    files: {
-      "enc_note.json": { content: JSON.stringify(encryptedObj, null, 2) }
+/* Decrypt from the exported string */
+async function decryptString(encryptedString, password){
+  let blob;
+  try { blob = JSON.parse(encryptedString); } catch(e){ throw new Error('Invalid file format'); }
+  if(blob.v !== 1) throw new Error('Unsupported version');
+  const salt = fromB64(blob.salt);
+  const iv = fromB64(blob.iv);
+  const ct = fromB64(blob.ct);
+  const key = await deriveKey(password, salt);
+  const pt = await crypto.subtle.decrypt({ name:'AES-GCM', iv }, key, ct);
+  return JSON.parse(dec.decode(pt));
+}
+
+/* ======== App storage & UI ======== */
+const LS_KEY = 'encrypted_notes_blob_v1';
+let unlocked = false;
+let currentPassword = null;
+let notes = []; // array of {id,title,content,mtime}
+
+const $ = sel => document.querySelector(sel);
+const passwordInput = $('#password');
+const unlockBtn = $('#unlockBtn');
+const lockBtn = $('#lockBtn');
+const editorCard = $('#editorCard');
+const noteTitle = $('#noteTitle');
+const noteContent = $('#noteContent');
+const saveNoteBtn = $('#saveNoteBtn');
+const newNoteBtn = $('#newNoteBtn');
+const notesList = $('#notesList');
+const exportBtn = $('#exportBtn');
+const importBtn = $('#importBtn');
+const fileInput = $('#fileInput');
+const eraseAllBtn = $('#eraseAllBtn');
+const autoSaveCheckbox = $('#autoSaveCheckbox');
+
+function renderNotesList(){
+  if(!unlocked){ notesList.innerHTML = '<small>Locked. Enter password and click Unlock to view notes.</small>'; return; }
+  if(notes.length === 0){ notesList.innerHTML = '<small>No notes yet.</small>'; return; }
+  notesList.innerHTML = '';
+  notes.slice().reverse().forEach(n=>{
+    const row = document.createElement('div'); row.className='note-row card';
+    const left = document.createElement('div');
+    left.style.flex='1';
+    left.innerHTML = `<div class="note-title">${escapeHtml(n.title||'(no title)')}</div><div class="meta">${new Date(n.mtime).toLocaleString()}</div><div style="margin-top:8px">${escapeHtmlSnippet(n.content)}</div>`;
+    const actions = document.createElement('div');
+    actions.style.display='flex'; actions.style.flexDirection='column'; actions.style.gap='6px';
+    const openBtn = document.createElement('button'); openBtn.textContent='Open';
+    const delBtn = document.createElement('button'); delBtn.textContent='Delete'; delBtn.className='danger';
+    const copyBtn = document.createElement('button'); copyBtn.textContent='Copy';
+    openBtn.onclick = ()=>{ noteTitle.value = n.title; noteContent.value = n.content; window.scrollTo({top:0, behavior:'smooth'}); };
+    delBtn.onclick = ()=>{ if(confirm('Delete this note?')){ notes = notes.filter(x=>x.id!==n.id); saveToLocalEncrypted(); renderNotesList(); } };
+    copyBtn.onclick = ()=>{ navigator.clipboard.writeText(n.content).then(()=>alert('Copied to clipboard')); };
+    actions.appendChild(openBtn); actions.appendChild(copyBtn); actions.appendChild(delBtn);
+    row.appendChild(left); row.appendChild(actions);
+    notesList.appendChild(row);
+  });
+}
+
+function escapeHtml(s){ return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\n/g,'<br/>'); }
+function escapeHtmlSnippet(s){ const short = s.length>300? s.slice(0,300)+'…': s; return escapeHtml(short); }
+
+async function saveToLocalEncrypted(){
+  if(!unlocked) return;
+  const blob = await encryptObject({notes, savedAt: new Date().toISOString()}, currentPassword);
+  localStorage.setItem(LS_KEY, blob);
+}
+
+async function loadFromLocalEncrypted(password){
+  const raw = localStorage.getItem(LS_KEY);
+  if(!raw) return null;
+  const parsed = await decryptString(raw, password);
+  return parsed;
+}
+
+unlockBtn.addEventListener('click', async ()=>{
+  const pw = passwordInput.value;
+  if(!pw){ alert('Enter a password'); return; }
+  // try to load local storage
+  try{
+    const parsed = await loadFromLocalEncrypted(pw);
+    if(parsed){
+      notes = parsed.notes || [];
+      unlocked = true; currentPassword = pw;
+      editorCard.style.display = 'block';
+      renderNotesList();
+      alert('Unlocked — notes loaded from local storage.');
+    } else {
+      // no local data: start fresh but still unlocked (user can create notes)
+      notes = [];
+      unlocked = true; currentPassword = pw;
+      editorCard.style.display = 'block';
+      renderNotesList();
+      alert('No local encrypted notes found. You are unlocked and can create new notes.');
     }
-  };
-  const resp = await fetch('https://api.github.com/gists/' + encodeURIComponent(gistId), {
-    method: 'PATCH',
-    headers: Object.assign({'Content-Type':'application/json'}, headers),
-    body: JSON.stringify(payload)
-  });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Gist update failed: ' + resp.status + ' ' + errText);
+  }catch(err){
+    console.error(err);
+    alert('Failed to decrypt: wrong password or corrupt data.');
   }
-  return resp.json();
+});
+
+lockBtn.addEventListener('click', async ()=>{
+  currentPassword = null; unlocked = false; editorCard.style.display='none'; notes = []; noteTitle.value=''; noteContent.value=''; passwordInput.value='';
+  renderNotesList();
+  alert('Locked. Password cleared from memory.');
+});
+
+saveNoteBtn.addEventListener('click', async ()=>{
+  if(!unlocked){ alert('Unlock first'); return; }
+  const id = Date.now().toString(36) + Math.random().toString(36).slice(2,7);
+  const note = { id, title: noteTitle.value.trim(), content: noteContent.value, mtime: Date.now() };
+  // append
+  notes.push(note);
+  if(autoSaveCheckbox.checked) await saveToLocalEncrypted();
+  renderNotesList();
+  alert('Saved locally. Click Export to produce an encrypted file you can store remotely.');
+});
+
+newNoteBtn.addEventListener('click', ()=>{ noteTitle.value=''; noteContent.value=''; noteTitle.focus(); });
+
+exportBtn.addEventListener('click', async ()=>{
+  if(!unlocked){ alert('Unlock first'); return; }
+  // create JSON with salt/iv/ct using currentPassword
+  try{
+    const payload = await encryptObject({notes, savedAt: new Date().toISOString()}, currentPassword);
+    const blob = new Blob([payload], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'encrypted-notes.json'; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  }catch(e){
+    console.error(e); alert('Export failed: '+e.message);
+  }
+});
+
+importBtn.addEventListener('click', ()=> fileInput.click());
+fileInput.addEventListener('change', async (ev)=>{
+  const f = ev.target.files[0]; if(!f) return;
+  const txt = await f.text();
+  const pw = prompt('Enter password to unlock imported file (this must be the same password used to encrypt it):');
+  if(!pw) return alert('Password required to import.');
+  try{
+    const parsed = await decryptString(txt, pw);
+    // merged: replace in-memory notes
+    notes = parsed.notes || [];
+    unlocked = true; currentPassword = pw; editorCard.style.display='block';
+    await saveToLocalEncrypted(); // save a local encrypted copy with this password
+    renderNotesList();
+    alert('Imported and saved locally.');
+  }catch(e){ console.error(e); alert('Import failed: wrong password or file corrupt.') }
+  fileInput.value = '';
+});
+
+eraseAllBtn.addEventListener('click', async ()=>{
+  if(!confirm('Erase all local encrypted notes? This will remove the local encrypted blob only.')) return;
+  localStorage.removeItem(LS_KEY);
+  notes = []; renderNotesList();
+  alert('Local encrypted blob erased. If you have exported copies elsewhere they remain unaffected.');
+});
+
+/* autosave on changes if unlocked & autoSave enabled */
+noteContent.addEventListener('input', async ()=>{
+  if(unlocked && autoSaveCheckbox.checked){
+    // update a temporary draft, not create new note
+    // Save current draft as a note with id 'draft' (overwrite)
+    const idx = notes.findIndex(n=>n.id==='__draft__');
+    const draft = { id:'__draft__', title: noteTitle.value, content: noteContent.value, mtime: Date.now() };
+    if(idx>=0) notes[idx]=draft; else notes.push(draft);
+    await saveToLocalEncrypted();
+    renderNotesList();
+  }
+});
+
+/* helpers */
+function init(){
+  renderNotesList();
+  editorCard.style.display='none';
+  // if there is a blob but no password, show note to export/import
+  if(localStorage.getItem(LS_KEY)){
+    notesList.innerHTML = '<small>Encrypted data present in localStorage. Enter your password and click Unlock to view notes, or Export to download the encrypted file.</small>';
+  }
 }
-
-async function fetchGist(gistId) {
-  if (!gistId) throw new Error('Missing gist id');
-  const resp = await fetch('https://api.github.com/gists/' + encodeURIComponent(gistId), {
-    method: 'GET',
-    headers: { 'Accept': 'application/vnd.github.v3+json' }
-  });
-  if (!resp.ok) {
-    const errText = await resp.text();
-    throw new Error('Gist fetch failed: ' + resp.status + ' ' + errText);
-  }
-  return resp.json();
-}
-
-/* Create new gist (upload) */
-createGistBtn.addEventListener('click', async () => {
-  if (!unlockedPassword) { setStatus('Unlock first (derive key from password) before uploading.', true); return; }
-  const obj = lastEncryptedCached || await encryptPlaintext(noteArea.value || '', unlockedPassword);
-  setStatus('Uploading to GitHub Gist...');
-  try {
-    const data = await createGistOnGitHub(obj);
-    gistIdInput.value = data.id || '';
-    if (rememberToken.checked) localStorage.setItem('gist_token', tokenInput.value);
-    setStatus('Gist created. ID: ' + (data.id || '') + ' — Save this ID to load from another device.');
-  } catch (e) {
-    console.error(e);
-    setStatus('Create gist failed: ' + e.message, true);
-  }
-});
-
-/* Update existing gist */
-updateGistBtn.addEventListener('click', async () => {
-  if (!unlockedPassword) { setStatus('Unlock first to update gist.', true); return; }
-  const gistId = gistIdInput.value.trim();
-  if (!gistId) { setStatus('Provide gist id to update.', true); return; }
-  setStatus('Encrypting & updating gist...');
-  try {
-    const obj = await encryptPlaintext(noteArea.value || '', unlockedPassword);
-    const data = await updateGistOnGitHub(gistId, obj);
-    if (rememberToken.checked) localStorage.setItem('gist_token', tokenInput.value);
-    lastEncryptedCached = obj;
-    setStatus('Gist updated. ID: ' + (data.id || gistId));
-  } catch (e) {
-    console.error(e);
-    setStatus('Update gist failed: ' + e.message, true);
-  }
-});
-
-/* Load from gist */
-loadGistBtn.addEventListener('click', async () => {
-  const gistId = gistIdInput.value.trim();
-  if (!gistId) { setStatus('Enter gist id to load.', true); return; }
-  setStatus('Fetching gist...');
-  try {
-    const data = await fetchGist(gistId);
-    // find enc_note.json file
-    const files = data.files || {};
-    const file = files['enc_note.json'] || files[Object.keys(files)[0]]; // fallback to first file
-    if (!file || !file.content) throw new Error('Gist does not contain a file with encrypted content.');
-    let parsed;
-    try { parsed = JSON.parse(file.content); } catch (e) { throw new Error('Gist content is not valid JSON.'); }
-    // attempt to decrypt with entered password
-    const pw = passwordInput.value || '';
-    if (!pw) { setStatus('Enter password to decrypt fetched gist.', true); return; }
-    setStatus('Decrypting fetched content...');
-    const plain = await decryptStoredObj(parsed, pw);
-    // show in UI and cache object locally if user wants
-    unlockedPassword = pw;
-    noteArea.value = plain;
-    lastEncryptedCached = parsed;
-    // optionally write to localStorage (we won't auto-write unless user chooses Save Locally)
-    showNotesUI(true);
-    setStatus('Loaded & decrypted from gist. (You can Save Locally or Update Gist.)');
-  } catch (e) {
-    console.error(e);
-    setStatus('Load failed: ' + e.message, true);
-  }
-});
-
-/* On load: restore token if remembered */
-window.addEventListener('load', () => {
-  const savedTok = localStorage.getItem('gist_token');
-  if (savedTok) { tokenInput.value = savedTok; rememberToken.checked = true; }
-  if (storageExists()) setStatus('Local encrypted data present. Enter password and Unlock.');
-  else setStatus('No local encrypted data. Provide password and Create New or upload a gist.');
-});
-
-/* token persistence toggle */
-rememberToken.addEventListener('change', () => {
-  if (!rememberToken.checked) { localStorage.removeItem('gist_token'); setStatus('Token will not be saved.'); }
-});
-
-/* small helpers */
-function showNotesUI(show) {
-  notesUI.style.display = show ? 'block' : 'none';
-  changeBtn.style.display = show ? 'inline-block' : 'none';
-}
-
-/* Allow Ctrl/Cmd+S to save locally */
-noteArea.addEventListener('keydown', (e) => {
-  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
-    e.preventDefault();
-    saveLocalBtn.click();
-  }
-});
+init();
 </script>
 </body>
 </html>
