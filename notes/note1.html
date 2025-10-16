@@ -1,18 +1,25 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>First Note</title>
-  <link rel="stylesheet" href="../style.css">
+  <meta charset="UTF-8" />
+  <title>Encrypted Note</title>
+  <link rel="stylesheet" href="../style.css" />
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.2.0/crypto-js.min.js"></script>
+  <script src="../decrypt.js"></script>
 </head>
 <body>
   <header>
     <a href="../index.html">← Back</a>
-    <h1>First Note</h1>
+    <h1>Secret Note #1</h1>
   </header>
 
-  <article>
-    <p>This is my first note.</p>
-  </article>
+  <main>
+    <!-- Encrypted text goes here -->
+    <pre id="encrypted-data">
+U2FsdGVkX1+7cqvg5Qgc4sfGZmZqSd2jcXmv6nvwqIhGfLy4Ldrq0I7Y1fC0P5sf
+    </pre>
+
+    <div id="decrypted-content" style="display:none;"></div>
+  </main>
 </body>
 </html>
